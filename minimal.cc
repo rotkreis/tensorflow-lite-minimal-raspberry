@@ -15,20 +15,17 @@ limitations under the License.
 #include <cstdio>
 #include <iostream>
 #include <chrono>
+#include <opencv2/opencv.hpp>
+#include <opencv2/core/core.hpp>
 #include "tensorflow/lite/interpreter.h"
 #include "tensorflow/lite/kernels/register.h"
 #include "tensorflow/lite/model.h"
 #include "tensorflow/lite/optional_debug_tools.h"
 
 // This is an example that is minimal to read a model
-// from disk and perform inference. There is no data being loaded
-// that is up to you to add as a user.
+// and compute with a image
 //
-// NOTE: Do not add any dependencies to this that cannot be built with
-// the minimal makefile. This example must remain trivial to build with
-// the minimal build tool.
-//
-// Usage: minimal <tflite model>
+// Usage: minimal <tflite model> <image>
 
 using namespace tflite;
 using namespace std::chrono;
@@ -41,11 +38,26 @@ using namespace std;
   }
 
 int main(int argc, char* argv[]) {
-  if (argc != 2) {
-    fprintf(stderr, "minimal <tflite model>\n");
+  if (argc != 3) {
+    fprintf(stderr, "minimal <tflite model> <image>\n");
     return 1;
   }
   const char* filename = argv[1];
+  const string image_path = argv[2];
+
+  // Read image
+  auto t0_0 = high_resolution_clock::now();
+  auto img = cv::imread(image_path);
+  // throw away top 160 pixels, as data pre-processing
+  img = img(cv::Rect(0, 160, 640, 320)); 
+  cv::resize(img, img, cv::Size(200,66));
+  cv::cvtColor(img, img, CV_BGR2RGB);
+  img.convertTo(img, CV_32FC3);
+  img = (img / 255.0 - 0.5) / 0.5;
+
+  auto t0_1 = high_resolution_clock::now();
+  auto duration0 = duration_cast<milliseconds>(t0_1 - t0_0);
+  cout << "image processing time : " << duration0.count() << endl;
 
   // Load model
   std::unique_ptr<tflite::FlatBufferModel> model =
@@ -66,10 +78,30 @@ int main(int argc, char* argv[]) {
 
   // Fill input buffers
   // TODO(user): Insert code to fill input tensors
-  int range = 3 * 66 * 200;
-  for (int i = 0; i < range; ++i) {
-	  interpreter->typed_input_tensor<float>(0)[i] = 0.5;
+//  int range = 3 * 66 * 200;
+//  for (int i = 0; i < range; ++i) {
+//	  interpreter->typed_input_tensor<float>(0)[i] = 0.5;
+//  }
+
+  int index = 0;
+  const int offset = img.rows * img.cols;
+  for (int i = 0; i < img.rows; ++i) {
+	const auto pixel = img.ptr<cv::Vec3f>(i);
+    for(int j = 0; j < img.cols; ++j) {
+//			interpreter->typed_input_tensor<float>(0)[index] = pixel[j][0];
+//			interpreter->typed_input_tensor<float>(0)[index + 1] = pixel[j][1];
+//			interpreter->typed_input_tensor<float>(0)[index + 2] = pixel[j][2];
+
+			interpreter->typed_input_tensor<float>(0)[index] = pixel[j][0];
+			interpreter->typed_input_tensor<float>(0)[index + offset] = pixel[j][1];
+			interpreter->typed_input_tensor<float>(0)[index + offset * 2] = pixel[j][2];
+
+			index++;
+	}
   }
+  std::cout << interpreter->typed_input_tensor<float>(0)[0] << " " 
+		  << interpreter->typed_input_tensor<float>(0)[1] <<  " "
+		  << interpreter->typed_input_tensor<float>(0)[2] << std::endl;
 
   // Run inference
   auto t1 = high_resolution_clock::now();
